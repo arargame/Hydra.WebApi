@@ -22,7 +22,7 @@ namespace Hydra.WebApi.Extensions
 {
     public static class ServiceCollectionExtensions
     {
-        public static IServiceCollection AddHydraDependencies(this IServiceCollection services, IConfiguration configuration)
+        public static IServiceCollection AddHydraDependencies(this IServiceCollection services, IConfiguration configuration, params Assembly[] additionalAssemblies)
         {
             services.AddScoped<IControllerInjector, ControllerInjector>();
 
@@ -32,7 +32,7 @@ namespace Hydra.WebApi.Extensions
 
             services.AddScoped<ISessionContext, SessionContext>();
 
-            AddDataAccessLayerDependencies(services);
+            AddDataAccessLayerDependencies(services, additionalAssemblies);
 
             AddBusinessLayerDependencies(services);
 
@@ -96,7 +96,7 @@ namespace Hydra.WebApi.Extensions
             }
         }
 
-        private static void AddDataAccessLayerDependencies(IServiceCollection services)
+        private static void AddDataAccessLayerDependencies(IServiceCollection services, Assembly[] additionalAssemblies)
         {
             services.AddScoped<IUnitOfWork, UnitOfWork>();
 
@@ -115,11 +115,10 @@ namespace Hydra.WebApi.Extensions
                 {
                     typeof(Repository<>).Assembly,
                     Assembly.GetExecutingAssembly()
-                };
+                }.Concat(additionalAssemblies).ToArray();
 
                 return new RepositoryFactoryService(
                     sp,
-                    sp.GetRequiredService<LogService>(),
                     assembliesToScan
                 );
             });

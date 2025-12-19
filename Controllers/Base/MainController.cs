@@ -9,7 +9,7 @@ using Hydra.Services.Core;
 using Microsoft.AspNetCore.Mvc;
 
 [ApiController]
-public abstract class MainController<T> : ControllerBase where T : BaseObject<T>
+public abstract class MainController<T> : ControllerBase where T : BaseObject<T>, new()
 {
     protected IService<T> Service { get; }
 
@@ -158,4 +158,12 @@ public abstract class MainController<T> : ControllerBase where T : BaseObject<T>
 
         return new JsonResult(response);
     }
+#if DEBUG
+    [HttpPost("Seed/{count:int}")]
+    public virtual async Task<IActionResult> Seed(int count)
+    {
+        await Service.SeedAsync(count);
+        return Ok($"{count} generated.");
+    }
+#endif
 }

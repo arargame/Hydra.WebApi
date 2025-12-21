@@ -34,7 +34,7 @@ namespace Hydra.WebApi.Extensions
 
             AddDataAccessLayerDependencies(services, additionalAssemblies);
 
-            AddBusinessLayerDependencies(services);
+            AddBusinessLayerDependencies(services, additionalAssemblies);
 
             AddCacheDependencies(services);
 
@@ -105,18 +105,14 @@ namespace Hydra.WebApi.Extensions
             services.AddScoped<EfCoreDatabaseService>();
 
             services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
-            services.AddCustomServicesByAttribute<RegisterAsRepositoryAttribute>(typeof(Repository<>).Assembly, Assembly.GetExecutingAssembly());
+            
+            var assembliesToScan = new[] { typeof(Repository<>).Assembly, Assembly.GetExecutingAssembly() }.Concat(additionalAssemblies).ToArray();
+            services.AddCustomServicesByAttribute<RegisterAsRepositoryAttribute>(assembliesToScan);
 
             // services.AddScoped<IRepositoryFactoryService, RepositoryFactoryService>(); // Removed to prevent DI validation error
 
             services.AddScoped<IRepositoryFactoryService>(sp =>
             {
-                var assembliesToScan = new[]
-                {
-                    typeof(Repository<>).Assembly,
-                    Assembly.GetExecutingAssembly()
-                }.Concat(additionalAssemblies).ToArray();
-
                 return new RepositoryFactoryService(
                     sp,
                     assembliesToScan
@@ -124,10 +120,12 @@ namespace Hydra.WebApi.Extensions
             });
         }
 
-        private static void AddBusinessLayerDependencies(IServiceCollection services)
+        private static void AddBusinessLayerDependencies(IServiceCollection services, Assembly[] additionalAssemblies)
         {
             services.AddSingleton<ISecretManager, LocalSecretManager>();
             services.AddSingleton<ICustomConfigurationService, CustomConfigurationService>();
+            
+            services.AddScoped<FileLogWriterService>();
 
             //services.AddSingleton<ILogDbWriterService, LogDbWriterService>();
             services.AddScoped<ILogDbWriterService>(provider =>
@@ -141,7 +139,9 @@ namespace Hydra.WebApi.Extensions
 
             services.AddScoped<ServiceInjector>();
             services.AddScoped(typeof(IService<>), typeof(Service<>));
-            services.AddCustomServicesByAttribute<RegisterAsServiceAttribute>(typeof(Service<>).Assembly, Assembly.GetExecutingAssembly());
+            
+            var assembliesToScan = new[] { typeof(Service<>).Assembly, Assembly.GetExecutingAssembly() }.Concat(additionalAssemblies).ToArray();
+            services.AddCustomServicesByAttribute<RegisterAsServiceAttribute>(assembliesToScan);
         }
 
         private static void AddCacheDependencies(IServiceCollection services)

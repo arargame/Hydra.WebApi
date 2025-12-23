@@ -122,7 +122,7 @@ public abstract class MainController<T> : ControllerBase where T : BaseObject<T>
 
     [HttpPost]
     [Route("Select")]
-    public async Task<JsonResult> Select([FromBody] TableDTO? tableDTO = null, [FromQuery]ViewType? viewType = ViewType.ListView)
+    public virtual async Task<JsonResult> Select([FromBody] TableDTO? tableDTO = null, [FromQuery]ViewType? viewType = ViewType.ListView)
     {
         var response = new ResponseObject()
             .SetActionName(ActionName)

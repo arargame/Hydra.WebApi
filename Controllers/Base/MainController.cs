@@ -79,7 +79,7 @@ public abstract class MainController<T> : ControllerBase where T : BaseObject<T>
                             .SetId(id)
                             .UseDefaultMessages();
 
-        var (finalDTO, result) = await Service.GetDetailsAsync<T>(id);
+        var (finalDTO, result) = await Service.GetDetailsAsync<T>(id, ResolveViewDTOType());
 
         var dataPackage = new
         {
@@ -120,6 +120,15 @@ public abstract class MainController<T> : ControllerBase where T : BaseObject<T>
         return Ok("Pong");
     }
 
+    /// <summary>
+    /// Resolves the ViewDTO type for T by convention ("{T}DTO" or "{T}ViewDTO"),
+    /// optionally honoring an explicit type name coming from the client.
+    /// </summary>
+    protected Type? ResolveViewDTOType(string? viewDTOTypeName = null)
+    {
+        return ViewDTOTypeResolver.Resolve(viewDTOTypeName, typeof(T).Name);
+    }
+
     [HttpPost]
     [Route("Select")]
     public virtual async Task<JsonResult> Select([FromBody] TableDTO? tableDTO = null, [FromQuery]ViewType? viewType = ViewType.ListView)
@@ -128,15 +137,24 @@ public abstract class MainController<T> : ControllerBase where T : BaseObject<T>
             .SetActionName(ActionName)
             .UseDefaultMessages();
 
-        var (finalDTO, results) = await Service.SelectWithTableAsync<T>(tableDTO: tableDTO, viewType: viewType);
+        tableDTO ??= new TableDTO();
 
-        var dataPackage = new
-        {
-            Table = finalDTO
-        };
+        if (string.IsNullOrEmpty(tableDTO.Name))
+            tableDTO.Name = typeof(T).Name;
 
+        var viewDTOType = ResolveViewDTOType(tableDTO.ViewDTOTypeName);
+
+        if (string.IsNullOrEmpty(tableDTO.ViewDTOTypeName) && viewDTOType != null)
+            tableDTO.SetViewDTOTypeName(viewDTOType.Name);
+
+        var (finalDTO, results) = await Service.SelectWithTableAsync<T>(tableDTO: tableDTO,
+                                                                        viewType: viewType,
+                                                                        viewDTOTypeToPrepareUsingConfigurations: viewDTOType);
+
+        //NOTE: The TableDTO is returned directly (not wrapped in an anonymous {Table=...} package)
+        //so that ApiClient.SelectAsync can deserialize ResponseObject.Data as TableDTO.
         return new JsonResult(response.SetSuccess(results?.Any() ?? false)
-                                      .SetData(dataPackage));
+                                      .SetData(finalDTO));
     }
 
 

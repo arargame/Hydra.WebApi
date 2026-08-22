@@ -51,11 +51,20 @@ namespace Hydra.WebApi.Extensions
             {
                 var config = provider.GetRequiredService<ICustomConfigurationService>();
 
+                var connectionFactory = provider.GetRequiredService<Func<string, MsSqlConnection>>();
+
                 var defaultConnStr = config.Get("DefaultConnection");
 
                 var connection = ConnectionFactory.CreateConnection(ConnectionType.MsSql, defaultConnStr);
 
-                return new TableService(connection);
+                //Tablo bazında bağlantı yönlendirmesi: bazı tablolar (ör. Log) ayrı bir
+                //veritabanında yaşar. Eşleme appsettings'ten okunur:
+                //  "Hydra": { "TableConnections": { "Log": "LogDbConnection" } }
+                //Eşleme tanımlı değilse varsayılan bağlantı kullanılır.
+                return new TableService(
+                    defaultConnection: connection,
+                    connectionByName: name => connectionFactory(name),
+                    connectionNameForTable: tableName => config.Get($"Hydra:TableConnections:{tableName}"));
             });
 
             ViewDTORegistryLoader.LoadAllViewDTOs(typeof(ViewDTO).Assembly,Assembly.GetExecutingAssembly());

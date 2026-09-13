@@ -1,4 +1,4 @@
-﻿using Hydra.AccessManagement;
+using Hydra.AccessManagement;
 using Hydra.Core;
 using Hydra.DI;
 using Hydra.DTOs;
@@ -153,7 +153,7 @@ public abstract class MainController<T> : ControllerBase where T : BaseObject<T>
 
         //NOTE: The TableDTO is returned directly (not wrapped in an anonymous {Table=...} package)
         //so that ApiClient.SelectAsync can deserialize ResponseObject.Data as TableDTO.
-        return new JsonResult(response.SetSuccess(results?.Any() ?? false)
+        return new JsonResult(response.SetSuccess(finalDTO != null)
                                       .SetData(finalDTO));
     }
 

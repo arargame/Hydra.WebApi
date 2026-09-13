@@ -1,4 +1,5 @@
-﻿using Hydra.AccessManagement;
+using Hydra.AccessManagement;
+using Hydra.AccessManagement.Authorization;
 using Hydra.AccessManagement.Jwt;
 using Hydra.CacheManagement.Managers;
 using Hydra.DAL.Core;
@@ -10,10 +11,12 @@ using Hydra.IdentityAndAccess;
 using Hydra.Services;
 using Hydra.Services.Cache;
 using Hydra.Services.Core;
+using Hydra.WebApi.Filters;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
 using System.Reflection;
 using System.Text;
@@ -37,6 +40,11 @@ namespace Hydra.WebApi.Extensions
             AddBusinessLayerDependencies(services, additionalAssemblies);
 
             AddCacheDependencies(services);
+
+            //Kimlik doğrulama (JWT bearer) ve yetkilendirme (permission filtresi).
+            //Bu çağrı önceden YOKTU: JwtDependencies yazılmış ama hiçbir yerden çağrılmıyordu,
+            //yani üretilen token'ı doğrulayacak bir şema hiç kayıtlı değildi (bkz. Academy 5.4).
+            AddAuthenticationAndAuthorization(services, configuration);
 
             services.AddScoped<Func<string, MsSqlConnection>>(provider => name =>
             {
@@ -114,7 +122,7 @@ namespace Hydra.WebApi.Extensions
             services.AddScoped<EfCoreDatabaseService>();
 
             services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
-            
+
             var assembliesToScan = new[] { typeof(Repository<>).Assembly, Assembly.GetExecutingAssembly() }.Concat(additionalAssemblies).ToArray();
             services.AddCustomServicesByAttribute<RegisterAsRepositoryAttribute>(assembliesToScan);
 
@@ -133,7 +141,7 @@ namespace Hydra.WebApi.Extensions
         {
             services.AddSingleton<ISecretManager, LocalSecretManager>();
             services.AddSingleton<ICustomConfigurationService, CustomConfigurationService>();
-            
+
             services.AddScoped<FileLogWriterService>();
 
             //services.AddSingleton<ILogDbWriterService, LogDbWriterService>();
@@ -148,7 +156,7 @@ namespace Hydra.WebApi.Extensions
 
             services.AddScoped<ServiceInjector>();
             services.AddScoped(typeof(IService<>), typeof(Service<>));
-            
+
             var assembliesToScan = new[] { typeof(Service<>).Assembly, Assembly.GetExecutingAssembly() }.Concat(additionalAssemblies).ToArray();
             services.AddCustomServicesByAttribute<RegisterAsServiceAttribute>(assembliesToScan);
         }
@@ -212,22 +220,42 @@ namespace Hydra.WebApi.Extensions
                 sp => sp.GetRequiredService<IQueryableCacheService<Guid, SystemUserPermission>>());
         }
 
-        private static void JwtDependencies(IServiceCollection services, IConfiguration configuration)
+        /// <summary>
+        /// Registers the JWT bearer scheme (so issued tokens are actually validated) and the
+        /// global deny-by-default permission filter.
+        ///
+        /// The signing key is resolved exactly the way <see cref="JwtTokenManager"/> resolves it —
+        /// secret store first, then configuration — because the issuing side and the validating
+        /// side signing with different keys is a failure mode that only shows up at runtime, as
+        /// "every token is invalid" with no explanation.
+        ///
+        /// A missing key no longer throws at startup: it falls back to the clearly-labelled
+        /// development key. Refusing to boot because a dev machine has no secret configured is not
+        /// safety, it is just a broken F5.
+        /// </summary>
+        private static void AddAuthenticationAndAuthorization(IServiceCollection services, IConfiguration configuration)
         {
             services.AddScoped<IJwtTokenManager, JwtTokenManager>();
+
+            services.AddScoped<IPermissionEvaluator, PermissionEvaluator>();
+
+            var secretKey = configuration[$"Secrets:{JwtTokenManager.SecretKeyConfigName}"]
+                            ?? configuration[JwtTokenManager.SecretKeyConfigName];
+
+            if (string.IsNullOrWhiteSpace(secretKey))
+                secretKey = JwtTokenManager.DevelopmentFallbackSecret;
+
+            var key = Encoding.UTF8.GetBytes(secretKey);
 
             services.AddAuthentication("Bearer")
                     .AddJwtBearer("Bearer", options =>
                     {
-                        var secretKey = configuration["Secrets:JwtSecretKey"];
-                        var key = Encoding.UTF8.GetBytes(secretKey ?? throw new Exception("JwtSecretKey missing"));
-
                         options.TokenValidationParameters = new TokenValidationParameters
                         {
                             ValidateIssuer = true,
                             ValidateAudience = true,
-                            ValidIssuer = "hydra-api",
-                            ValidAudience = "hydra-clients",
+                            ValidIssuer = JwtTokenManager.Issuer,
+                            ValidAudience = JwtTokenManager.Audience,
                             ValidateLifetime = true,
                             ValidateIssuerSigningKey = true,
                             IssuerSigningKey = new SymmetricSecurityKey(key)
@@ -235,6 +263,14 @@ namespace Hydra.WebApi.Extensions
                     });
 
             services.AddAuthorization();
+
+            //Global filtre. Configure<MvcOptions> kullanılıyor (AddControllers(...) yerine) çünkü
+            //AddControllers'ı tüketen uygulama kendi Program.cs'inde çağırıyor — böylece çağrı
+            //sırasından bağımsız olarak filtre eklenmiş oluyor.
+            services.Configure<MvcOptions>(options =>
+            {
+                options.Filters.Add<PermissionAuthorizationFilter>();
+            });
         }
     }
 }

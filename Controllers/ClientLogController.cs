@@ -1,10 +1,12 @@
 using Hydra.Core;
 using Hydra.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Text;
 
 namespace Hydra.WebApi.Controllers
 {
+    [AllowAnonymous]
     [ApiController]
     [Route("api/[controller]")]
     public class ClientLogController : ControllerBase

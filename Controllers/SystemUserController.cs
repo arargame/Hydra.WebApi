@@ -134,7 +134,17 @@ namespace Hydra.WebApi.Controllers
                             .SetSuccess(true)
                             .SetStatusCode(200);
 
-                    _cacheManager.Login(SessionInformation);
+                    var session = SessionInformation ?? new SessionInformation
+                    {
+                        SystemUserId = user.Id,
+                        Ip = HttpContext.Connection.RemoteIpAddress?.ToString(),
+                        UserAgent = Request.Headers.UserAgent.ToString(),
+                        IsAuthenticated = true
+                    };
+                    session.SystemUserId = user.Id;
+                    session.IsAuthenticated = true;
+
+                    _cacheManager.Login(session);
                 }
                 else
                 {

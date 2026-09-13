@@ -103,12 +103,20 @@ namespace Hydra.WebApi.Extensions
                 else if (attr is RegisterAsRepositoryAttribute repoAttr)
                     interfaceType = repoAttr.RepositoryInterface ?? implType.GetInterfaces().FirstOrDefault();
 
-                if (interfaceType != null)
+                // 1. Somut sınıfın kendisini kaydet (RoleSystemUserService, PermissionService vb.).
+                // Böylece hem _injector.GetServiceLazy<ConcreteClass>() hem de doğrudan DI enjeksiyonları çalışır.
+                if (!services.Any(s => s.ServiceType == implType))
+                {
+                    services.AddScoped(implType);
+                }
+
+                // 2. Arayüzü (IService<RoleSystemUser> vb.) somut sınıfın scoped örneğine bağla.
+                if (interfaceType != null && interfaceType != implType)
                 {
                     if (services.Any(s => s.ServiceType == interfaceType))
                         throw new InvalidOperationException($"Duplicate service registration for {interfaceType.Name}");
 
-                    services.AddScoped(interfaceType, implType);
+                    services.AddScoped(interfaceType, sp => sp.GetRequiredService(implType));
                 }
             }
         }

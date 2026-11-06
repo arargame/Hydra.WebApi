@@ -1,10 +1,12 @@
 using Hydra.AccessManagement;
+using Hydra.AccessManagement.Authorization;
 using Hydra.Core;
 using Hydra.DI;
 using Hydra.DTOs;
 using Hydra.DTOs.ViewDTOs;
 using Hydra.Http;
 using Hydra.IdentityAndAccess;
+using Hydra.Services;
 using Hydra.Services.Core;
 using Microsoft.AspNetCore.Mvc;
 
@@ -16,6 +18,43 @@ public abstract class MainController<T> : ControllerBase where T : BaseObject<T>
     private readonly IServiceFactory _serviceFactory;
     private readonly ISessionContext _sessionContext;
     public SessionInformation? SessionInformation => _sessionContext.GetCurrent();
+
+    /// <summary>Column-level security (Academy 5.5, layer 5).</summary>
+    protected IPermissionEvaluator? PermissionEvaluator
+        => _serviceFactory.GetService(typeof(IPermissionEvaluator)) as IPermissionEvaluator;
+
+    /// <summary>Id of the signed-in caller, or null when the request is anonymous.</summary>
+    protected Guid? CurrentUserId
+    {
+        get
+        {
+            var raw = User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+            return Guid.TryParse(raw, out var id) ? id : null;
+        }
+    }
+
+    /// <summary>
+    /// Removes the columns this caller may not see — from the meta-data AND from the values.
+    /// Called on every read endpoint, so an unauthorized column never reaches the wire: hiding a
+    /// column in the UI while still shipping its value in the JSON is a costume, not security.
+    /// </summary>
+    protected async Task ApplyPropertySecurityAsync(TableDTO? table, object? item = null)
+    {
+        var evaluator = PermissionEvaluator;
+
+        if (evaluator is null)
+            return;
+
+        var entityName = typeof(T).Name;
+
+        var denied = await evaluator.GetDeniedPropertiesAsync(CurrentUserId, entityName);
+
+        PropertySecurity.Apply(table, entityName, denied);
+
+        if (item is not null)
+            PropertySecurity.Redact(item, entityName, denied);
+    }
 
     public string? Name
     {
@@ -47,11 +86,11 @@ public abstract class MainController<T> : ControllerBase where T : BaseObject<T>
 
     [HttpPost]
     [Route("Create")]
-    public async Task<JsonResult> Create([FromBody] T entity)
+    public virtual async Task<JsonResult> Create([FromBody] T entity)
     {
         var response = await Service.CreateAsync(entity);
 
-        return new JsonResult(response);
+        return new JsonResult(response) { StatusCode = response.Success ? 200 : (response.StatusCode ?? 400) };
     }
 
     [HttpDelete]
@@ -81,6 +120,8 @@ public abstract class MainController<T> : ControllerBase where T : BaseObject<T>
 
         var (finalDTO, result) = await Service.GetDetailsAsync<T>(id, ResolveViewDTOType());
 
+        await ApplyPropertySecurityAsync(finalDTO, result);
+
         var dataPackage = new
         {
             Table = finalDTO,
@@ -104,6 +145,8 @@ public abstract class MainController<T> : ControllerBase where T : BaseObject<T>
 
         var entity = await Service.GetByIdAsync(id, getAllIncludes, includes);
 
+        await ApplyPropertySecurityAsync(table: null, item: entity);
+
         var response = new ResponseObject()
                          .SetActionName("GetById")
                          .SetId(id)
@@ -113,6 +156,35 @@ public abstract class MainController<T> : ControllerBase where T : BaseObject<T>
 
         return new JsonResult(response);
     }
+
+    /// <summary>
+    /// Çoka-çok ilişkide toplu bağ kurar/koparır — Role detayındaki "Permissions" sekmesinden
+    /// on izni tek seferde bağlamak gibi. Köprü tablonun adı gövdede geldiği için bu iki uç
+    /// bütün ilişkileri karşılar; yeni bir ilişki için sunucuda yazılacak kod yoktur.
+    ///
+    /// Yetkilendirme: global filtre bu action'ları da kapsar, yani çağıran kişinin bu controller
+    /// üzerinde izni yoksa istek buraya hiç ulaşmaz.
+    /// </summary>
+    [HttpPost]
+    [Route("LinkToCollection")]
+    public virtual async Task<JsonResult> LinkToCollection([FromBody] CollectionLinkDTO dto)
+    {
+        var response = await CollectionLinks.LinkAsync(dto);
+
+        return new JsonResult(response) { StatusCode = response.StatusCode ?? 200 };
+    }
+
+    [HttpPost]
+    [Route("UnlinkFromCollection")]
+    public virtual async Task<JsonResult> UnlinkFromCollection([FromBody] CollectionLinkDTO dto)
+    {
+        var response = await CollectionLinks.UnlinkAsync(dto);
+
+        return new JsonResult(response) { StatusCode = response.StatusCode ?? 200 };
+    }
+
+    private ICollectionLinkService CollectionLinks
+        => (ICollectionLinkService)_serviceFactory.GetService(typeof(ICollectionLinkService));
 
     [HttpGet("Ping")]
     public IActionResult Ping()
@@ -151,6 +223,8 @@ public abstract class MainController<T> : ControllerBase where T : BaseObject<T>
                                                                         viewType: viewType,
                                                                         viewDTOTypeToPrepareUsingConfigurations: viewDTOType);
 
+        await ApplyPropertySecurityAsync(finalDTO);
+
         //NOTE: The TableDTO is returned directly (not wrapped in an anonymous {Table=...} package)
         //so that ApiClient.SelectAsync can deserialize ResponseObject.Data as TableDTO.
         return new JsonResult(response.SetSuccess(finalDTO != null)
@@ -161,11 +235,11 @@ public abstract class MainController<T> : ControllerBase where T : BaseObject<T>
 
     [HttpPut]
     [Route("Update")]
-    public async Task<JsonResult> Update([FromBody] T entity)
+    public virtual async Task<JsonResult> Update([FromBody] T entity)
     {
         var response = await Service.UpdateAsync(entity);
 
-        return new JsonResult(response);
+        return new JsonResult(response) { StatusCode = response.Success ? 200 : (response.StatusCode ?? 400) };
     }
 
     [HttpPut]

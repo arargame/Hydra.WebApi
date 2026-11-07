@@ -6,6 +6,9 @@ using System.Text;
 
 namespace Hydra.WebApi.Controllers
 {
+    //İstemci hata logu yetki istemez: deny-by-default açıkken bu uç da kapalı kalırsa
+    //tarayıcıdaki hatalar sunucuya hiç ulaşamaz — sistem kendi arızasını bildiren kanalı
+    //kapatmış olur. Log yazmak bir ayrıcalık değil, teşhis aracı.
     [AllowAnonymous]
     [ApiController]
     [Route("api/[controller]")]

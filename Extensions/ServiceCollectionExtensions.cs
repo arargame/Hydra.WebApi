@@ -103,19 +103,22 @@ namespace Hydra.WebApi.Extensions
                 else if (attr is RegisterAsRepositoryAttribute repoAttr)
                     interfaceType = repoAttr.RepositoryInterface ?? implType.GetInterfaces().FirstOrDefault();
 
-                // 1. Somut sınıfın kendisini kaydet (RoleSystemUserService, PermissionService vb.).
-                // Böylece hem _injector.GetServiceLazy<ConcreteClass>() hem de doğrudan DI enjeksiyonları çalışır.
-                if (!services.Any(s => s.ServiceType == implType))
-                {
-                    services.AddScoped(implType);
-                }
-
-                // 2. Arayüzü (IService<RoleSystemUser> vb.) somut sınıfın scoped örneğine bağla.
-                if (interfaceType != null && interfaceType != implType)
+                if (interfaceType != null)
                 {
                     if (services.Any(s => s.ServiceType == interfaceType))
                         throw new InvalidOperationException($"Duplicate service registration for {interfaceType.Name}");
 
+                    //SOMUT tip de kayıtlı olmalı. Servisler birbirini somut tip üzerinden
+                    //çağırıyor (ör. SystemUserService → _injector.GetServiceLazy<RoleSystemUserService>()),
+                    //ServiceFactory ise GetRequiredService<T>() yapıyor. Sadece arayüz kaydı
+                    //olduğunda bu çağrılar "No service for type 'RoleSystemUserService'" ile
+                    //patlıyordu — login ve izin zinciri bu yüzden hiç çalışamamıştı.
+                    if (!services.Any(s => s.ServiceType == implType))
+                        services.AddScoped(implType);
+
+                    //Arayüz AYNI scoped örneğe yönlendiriliyor. İki bağımsız kayıt yapılsaydı
+                    //aynı istek içinde iki ayrı örnek oluşur, servislerin LRU cache'leri
+                    //birbirinden habersiz olurdu.
                     services.AddScoped(interfaceType, sp => sp.GetRequiredService(implType));
                 }
             }
@@ -161,6 +164,9 @@ namespace Hydra.WebApi.Extensions
                 return new LogDbWriterService(connection);
             });
             services.AddScoped<ILogService, LogService>();
+
+            //Çoka-çok köprü kayıtlarını kuran/koparan generic servis (LinkToCollection uçları).
+            services.AddScoped<ICollectionLinkService, CollectionLinkService>();
 
             services.AddScoped<ServiceInjector>();
             services.AddScoped(typeof(IService<>), typeof(Service<>));
